@@ -1,0 +1,617 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Moon, Sun, User, LogIn, Plus, Trash2, BookOpen, 
+  ChevronLeft, Image as ImageIcon, Home, Menu, X, Settings
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from 'firebase/auth';
+import { 
+  getFirestore, collection, addDoc, doc, deleteDoc, onSnapshot, 
+  query, orderBy, serverTimestamp, getDocs, where // Added getDocs and where for deletion logic
+} from 'firebase/firestore';
+
+// --- Firebase Configuration & Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// --- Main Application Component ---
+export default function TwoMangaApp() {
+  // --- State Management ---
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false); // Local state for demo admin
+  const [isDark, setIsDark] = useState(false);
+  const [view, setView] = useState('home'); // home, detail, read, admin
+  const [showLogin, setShowLogin] = useState(false);
+  
+  // Data States
+  const [mangas, setMangas] = useState([]);
+  const [chapters, setChapters] = useState([]);
+  const [selectedManga, setSelectedManga] = useState(null);
+  // FIX: Correctly initialize selectedChapter state using useState hook
+  const [selectedChapter, setSelectedChapter] = useState(null);
+
+  // Admin Form States
+  const [newMangaTitle, setNewMangaTitle] = useState('');
+  const [newMangaCover, setNewMangaCover] = useState('');
+  const [newChapterTitle, setNewChapterTitle] = useState('');
+  const [newChapterPages, setNewChapterPages] = useState(''); // Comma separated URLs
+  const [targetMangaId, setTargetMangaId] = useState('');
+
+  // --- Auth & Data Effects ---
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Mangas
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'mangas');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort in memory as per instructions
+      data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setMangas(data);
+    }, (error) => console.error("Error fetching mangas:", error));
+    return () => unsubscribe();
+  }, [user]);
+
+  // Fetch Chapters
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'chapters');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort by chapter number/name logic if needed, here just created time
+      data.sort((a, b) => (a.order || 0) - (b.order || 0)); 
+      setChapters(data);
+    }, (error) => console.error("Error fetching chapters:", error));
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- Logic Handlers ---
+
+  const handleLogin = (password) => {
+    // Simple hardcoded admin check for demo purposes
+    if (password === 'admin123') {
+      setIsAdmin(true);
+      setShowLogin(false);
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('เข้าสู่ระบบ Admin เรียบร้อย');
+    } else {
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('รหัสผ่านไม่ถูกต้อง');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAdmin(false);
+    setView('home');
+  };
+
+  const handleAddManga = async (e) => {
+    e.preventDefault();
+    if (!newMangaTitle || !newMangaCover) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mangas'), {
+        title: newMangaTitle,
+        cover: newMangaCover,
+        createdAt: serverTimestamp()
+      });
+      setNewMangaTitle('');
+      setNewMangaCover('');
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('เพิ่มเรื่องใหม่เรียบร้อย');
+    } catch (error) {
+      console.error(error);
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('เกิดข้อผิดพลาดในการเพิ่มเรื่อง');
+    }
+  };
+
+  const handleAddChapter = async (e) => {
+    e.preventDefault();
+    if (!targetMangaId || !newChapterTitle || !newChapterPages) return;
+    
+    const pagesArray = newChapterPages.split(',').map(url => url.trim()).filter(url => url);
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chapters'), {
+        mangaId: targetMangaId,
+        title: newChapterTitle,
+        pages: pagesArray,
+        createdAt: serverTimestamp(),
+        order: Date.now() // Simple ordering
+      });
+      setNewChapterTitle('');
+      setNewChapterPages('');
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('เพิ่มตอนใหม่เรียบร้อย');
+    } catch (error) {
+      console.error(error);
+      // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+      alert('เกิดข้อผิดพลาดในการเพิ่มตอน');
+    }
+  };
+
+  // --- NEW FUNCTION: Delete Manga and all related Chapters ---
+  const handleDeleteManga = async (mangaId, mangaTitle) => {
+    // Use prompt for confirmation
+    const isConfirmed = window.prompt(`หากต้องการลบเรื่อง "${mangaTitle}" และทุกตอนที่เกี่ยวข้องทั้งหมด กรุณาพิมพ์ 'CONFIRM' เพื่อยืนยัน`);
+    if (isConfirmed !== 'CONFIRM') return;
+
+    try {
+        // 1. Delete all associated chapters first
+        const chapterRef = collection(db, 'artifacts', appId, 'public', 'data', 'chapters');
+        // Create a query to find all chapters linked to this mangaId
+        const q = query(chapterRef, where("mangaId", "==", mangaId));
+        const snapshot = await getDocs(q);
+        
+        let deletedCount = 0;
+        for (const chapDoc of snapshot.docs) {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chapters', chapDoc.id));
+            deletedCount++;
+        }
+        
+        // 2. Delete the main manga document
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mangas', mangaId));
+
+        // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+        alert(`ลบเรื่อง "${mangaTitle}" และ ${deletedCount} ตอนเรียบร้อย`);
+    } catch (error) {
+        console.error("Error deleting manga:", error);
+        // NOTE: Replaced alert() with a custom prompt/modal in real-world apps, but using alert for simplicity here.
+        alert('เกิดข้อผิดพลาดในการลบเรื่อง: ' + error.message);
+    }
+  };
+
+
+  const handleDeleteChapter = async (chapterId) => {
+    // ใช้ Modal แทน confirm()
+    const isConfirmed = window.prompt("หากต้องการลบตอน กรุณาพิมพ์ 'CONFIRM' เพื่อยืนยัน");
+    if (isConfirmed !== 'CONFIRM') return;
+    
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chapters', chapterId));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const openManga = (manga) => {
+    setSelectedManga(manga);
+    setView('detail');
+  };
+
+  const openReader = (chapter) => {
+    setSelectedChapter(chapter);
+    setView('read');
+  };
+
+  // --- Components ---
+
+  const Navbar = () => (
+    <nav className={`w-full p-4 shadow-md flex justify-between items-center transition-colors duration-300 ${isDark ? 'bg-gray-900 text-white border-b border-gray-800' : 'bg-white text-gray-800 border-b border-orange-100'}`}>
+      <div 
+        className="flex items-center gap-2 cursor-pointer" 
+        onClick={() => { setView('home'); setSelectedManga(null); }}
+      >
+        <BookOpen className="text-orange-500 w-8 h-8" />
+        <h1 className="text-2xl font-bold tracking-tighter">
+          TWO-<span className="text-orange-500">MANGA</span>
+        </h1>
+      </div>
+
+      <div className="flex items-center gap-4">
+        {isAdmin && (
+          <button 
+            onClick={() => setView('admin')}
+            className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
+          >
+            <Settings size={16} />
+            <span className="hidden sm:inline">จัดการระบบ</span>
+          </button>
+        )}
+
+        <button 
+          onClick={() => setIsDark(!isDark)}
+          className={`p-2 rounded-full transition-colors ${isDark ? 'bg-gray-800 text-yellow-400 hover:bg-gray-700' : 'bg-orange-50 text-orange-500 hover:bg-orange-100'}`}
+        >
+          {isDark ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+
+        {isAdmin ? (
+          <button 
+             onClick={handleLogout}
+             className="text-sm font-bold text-red-500 hover:underline"
+          >
+            ออกจากระบบ
+          </button>
+        ) : (
+          <button 
+            onClick={() => setShowLogin(true)}
+            className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition shadow-lg shadow-orange-500/30"
+          >
+            <User size={18} />
+            <span className="hidden sm:inline">เข้าสู่ระบบ</span>
+          </button>
+        )}
+      </div>
+    </nav>
+  );
+
+  const LoginModal = () => {
+    if (!showLogin) return null;
+    const [pass, setPass] = useState('');
+    return (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className={`w-full max-w-md p-6 rounded-2xl shadow-2xl ${isDark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <LogIn className="text-orange-500" /> เข้าสู่ระบบ
+            </h2>
+            <button onClick={() => setShowLogin(false)}><X size={20} /></button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm mb-1 opacity-70">รหัสผ่าน</label> 
+              <input 
+                type="password" 
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+                className={`w-full p-3 rounded-lg border focus:ring-2 focus:ring-orange-500 outline-none ${isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
+                placeholder="กรอกรหัสผ่าน..."
+              />
+            </div>
+            <button 
+              onClick={() => handleLogin(pass)}
+              className="w-full bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600 transition"
+            >
+              ยืนยัน
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Views ---
+
+  const HomeView = () => (
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
+      <div className="mb-6 border-l-4 border-orange-500 pl-4">
+        <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>การ์ตูนมาใหม่</h2>
+        <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>อัปเดตล่าสุดวันนี้</p>
+      </div>
+
+      {mangas.length === 0 ? (
+        <div className="text-center py-20 opacity-50">
+          <ImageIcon className="w-16 h-16 mx-auto mb-4" />
+          <p>ยังไม่มีการ์ตูนในระบบ</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
+          {mangas.map(manga => (
+            <div 
+              key={manga.id} 
+              onClick={() => openManga(manga)}
+              className={`group cursor-pointer rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all hover:-translate-y-1 ${isDark ? 'bg-gray-800' : 'bg-white'}`}
+            >
+              <div className="aspect-[3/4] overflow-hidden relative">
+                <img 
+                  src={manga.cover} 
+                  alt={manga.title}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                  onError={(e) => e.target.src = 'https://placehold.co/300x400/orange/white?text=No+Image'}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                  <span className="text-white font-bold text-sm">อ่านเลย</span>
+                </div>
+              </div>
+              <div className="p-3">
+                <h3 className={`font-bold text-sm line-clamp-1 ${isDark ? 'text-white' : 'text-gray-800'}`}>{manga.title}</h3>
+                <p className="text-xs text-orange-500 mt-1">อัปเดตล่าสุด</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const MangaDetailView = () => {
+    if (!selectedManga) return null;
+    const mangaChapters = chapters.filter(c => c.mangaId === selectedManga.id);
+    
+    return (
+      <div className="max-w-5xl mx-auto p-4 sm:p-8">
+        <button 
+          onClick={() => setView('home')}
+          className={`mb-6 flex items-center gap-2 text-sm font-medium ${isDark ? 'text-gray-400 hover:text-white' : 'text-gray-600 hover:text-black'}`}
+        >
+          <ChevronLeft size={16} /> กลับหน้าหลัก
+        </button>
+
+        <div className="flex flex-col md:flex-row gap-8 mb-8">
+          <div className="w-full md:w-64 flex-shrink-0">
+            <div className="rounded-xl overflow-hidden shadow-2xl">
+              <img 
+                src={selectedManga.cover} 
+                alt={selectedManga.title} 
+                className="w-full h-auto object-cover"
+                onError={(e) => e.target.src = 'https://placehold.co/300x400/orange/white?text=No+Image'}
+              />
+            </div>
+          </div>
+          <div className="flex-1">
+            <h1 className={`text-3xl font-bold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>{selectedManga.title}</h1>
+            <div className="flex gap-2 mb-4">
+              <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded">Manga</span>
+              <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>Action</span>
+            </div>
+            <p className={`mb-6 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+              ยินดีต้อนรับสู่หน้าอ่านการ์ตูนเรื่อง {selectedManga.title} ติดตามตอนใหม่ได้ที่นี่ TWO-MANGA มอบประสบการณ์การอ่านที่ดีที่สุดสำหรับคุณ
+            </p>
+
+            <h3 className={`text-xl font-bold mb-4 border-b pb-2 ${isDark ? 'text-white border-gray-700' : 'text-gray-800 border-gray-200'}`}>
+              รายชื่อตอน ({mangaChapters.length})
+            </h3>
+
+            <div className="space-y-2">
+              {mangaChapters.length > 0 ? mangaChapters.map(chapter => (
+                <div 
+                  key={chapter.id}
+                  onClick={() => openReader(chapter)}
+                  className={`flex justify-between items-center p-4 rounded-lg cursor-pointer transition ${isDark ? 'bg-gray-800 hover:bg-gray-700 text-white' : 'bg-white border border-gray-100 hover:bg-orange-50 text-gray-800 hover:text-orange-600 shadow-sm'}`}
+                >
+                  <span className="font-medium">{chapter.title}</span>
+                  <span className="text-xs opacity-60">อ่านเลย</span>
+                </div>
+              )) : (
+                <p className="opacity-50 text-sm">ยังไม่มีตอนใหม่</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ReaderView = () => {
+    if (!selectedChapter) return null;
+    return (
+      <div className="max-w-4xl mx-auto min-h-screen bg-black">
+        <div className="sticky top-0 z-20 bg-gray-900/90 backdrop-blur text-white p-3 flex justify-between items-center shadow-lg">
+           <button onClick={() => setView('detail')} className="flex items-center gap-1 hover:text-orange-500">
+             <ChevronLeft /> <span className="text-sm">กลับ</span>
+           </button>
+           <h2 className="text-sm font-bold truncate max-w-[200px]">{selectedChapter.title}</h2>
+           <div className="w-8"></div> {/* Spacer */}
+        </div>
+        
+        <div className="flex flex-col items-center bg-gray-900 min-h-screen pb-20">
+          {selectedChapter.pages && selectedChapter.pages.length > 0 ? (
+            selectedChapter.pages.map((url, index) => (
+              <img 
+                key={index}
+                src={url}
+                alt={`Page ${index + 1}`}
+                className="w-full max-w-2xl object-contain"
+                loading="lazy"
+                onError={(e) => {
+                  e.target.style.display='none';
+                }}
+              />
+            ))
+          ) : (
+            <div className="text-white py-20">ไม่พบรูปภาพในตอนนี้</div>
+          )}
+        </div>
+        
+        {/* Navigation Footer (Mock) */}
+        <div className="fixed bottom-0 w-full max-w-4xl bg-gray-900 text-white p-4 flex justify-between border-t border-gray-800">
+             <button className="text-sm text-gray-400 hover:text-white">ตอนก่อนหน้า</button>
+             <button className="text-sm text-gray-400 hover:text-white">ตอนถัดไป</button>
+        </div>
+      </div>
+    );
+  };
+
+  const AdminPanelView = () => {
+    if (!isAdmin) return <div className="p-10 text-center">Access Denied</div>;
+    
+    return (
+      <div className="max-w-6xl mx-auto p-4 sm:p-8">
+        <div className="flex items-center gap-3 mb-8">
+           <Settings className="text-orange-500 w-8 h-8" />
+           <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Admin Control Panel</h1>
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Add Manga Section */}
+          <div className={`p-6 rounded-2xl shadow-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            <h2 className={`text-xl font-bold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-gray-800'}`}>
+              <Plus className="text-orange-500" /> เพิ่มเรื่องใหม่ (Add Manga)
+            </h2>
+            <form onSubmit={handleAddManga} className="space-y-4">
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>ชื่อเรื่อง</label>
+                <input 
+                  className={`w-full p-2 rounded border focus:border-orange-500 outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50'}`}
+                  value={newMangaTitle}
+                  onChange={(e) => setNewMangaTitle(e.target.value)}
+                  placeholder="เช่น One Piece, Naruto..."
+                  required
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>URL รูปหน้าปก</label>
+                <input 
+                  className={`w-full p-2 rounded border focus:border-orange-500 outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50'}`}
+                  value={newMangaCover}
+                  onChange={(e) => setNewMangaCover(e.target.value)}
+                  placeholder="https://example.com/cover.jpg"
+                  required
+                />
+              </div>
+              <button className="w-full bg-gray-900 hover:bg-black text-white py-2 rounded font-medium transition">
+                บันทึกข้อมูล
+              </button>
+            </form>
+          </div>
+
+          {/* Add Chapter Section */}
+          <div className={`p-6 rounded-2xl shadow-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            <h2 className={`text-xl font-bold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-gray-800'}`}>
+              <BookOpen className="text-orange-500" /> เพิ่มตอนใหม่ (Add Chapter)
+            </h2>
+            <form onSubmit={handleAddChapter} className="space-y-4">
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>เลือกเรื่อง</label>
+                <select 
+                  className={`w-full p-2 rounded border focus:border-orange-500 outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50'}`}
+                  value={targetMangaId}
+                  onChange={(e) => setTargetMangaId(e.target.value)}
+                  required
+                >
+                  <option value="">-- เลือกเรื่อง --</option>
+                  {mangas.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>ชื่อตอน/เลขตอน</label>
+                <input 
+                  className={`w-full p-2 rounded border focus:border-orange-500 outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50'}`}
+                  value={newChapterTitle}
+                  onChange={(e) => setNewChapterTitle(e.target.value)}
+                  placeholder="เช่น ตอนที่ 1, Chapter 105"
+                  required
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    URL ไฟล์เนื้อหา (ลิงก์ต่อหน้า, คั่นด้วยจุลภาค ,)
+                </label>
+                <p className={`text-xs mt-1 mb-2 ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>
+                    *หมายเหตุ: โปรดใช้ลิงก์ **รูปภาพ (PNG/JPG)** ต่อหน้า เนื่องจากระบบ Reader ถูกออกแบบให้อ่านภาพแบบเลื่อนลงทีละหน้า
+                </p>
+                <textarea 
+                  className={`w-full p-2 rounded border focus:border-orange-500 outline-none h-24 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50'}`}
+                  value={newChapterPages}
+                  onChange={(e) => setNewChapterPages(e.target.value)}
+                  placeholder="https://example.com/page1.png, https://example.com/page2.png"
+                  required
+                />
+              </div>
+              <button className="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 rounded font-medium transition">
+                อัปโหลดตอนใหม่
+              </button>
+            </form>
+          </div>
+        </div>
+        
+        {/* Manage Existing Mangas Section */}
+         <div className={`mt-8 p-6 rounded-2xl shadow-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+           <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>จัดการเรื่องที่มีอยู่ (All Mangas)</h3>
+           <div className="overflow-x-auto">
+             <table className="w-full text-left text-sm">
+               <thead>
+                 <tr className={`border-b ${isDark ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-500'}`}>
+                   <th className="p-2 w-full">ชื่อเรื่อง</th>
+                   <th className="p-2 text-right">จำนวนตอน</th>
+                   <th className="p-2 text-right">Action</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {mangas.map(m => {
+                   const chapterCount = chapters.filter(c => c.mangaId === m.id).length;
+                   return (
+                     <tr key={m.id} className={`border-b last:border-0 ${isDark ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-100 hover:bg-gray-50'}`}>
+                       <td className={`p-2 font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{m.title}</td>
+                       <td className={`p-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{chapterCount}</td>
+                       <td className="p-2 text-right">
+                         <button 
+                           onClick={() => handleDeleteManga(m.id, m.title)}
+                           className="text-red-500 hover:bg-red-100 p-1 rounded transition"
+                           title={`ลบเรื่อง ${m.title} ทั้งหมด`}
+                         >
+                           <Trash2 size={16} />
+                         </button>
+                       </td>
+                     </tr>
+                   )
+                 })}
+               </tbody>
+             </table>
+           </div>
+        </div>
+
+
+        {/* Manage Existing Chapters Section */}
+        <div className={`mt-8 p-6 rounded-2xl shadow-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+           <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>จัดการตอนที่มีอยู่ (Recent Chapters)</h3>
+           <div className="overflow-x-auto">
+             <table className="w-full text-left text-sm">
+               <thead>
+                 <tr className={`border-b ${isDark ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-500'}`}>
+                   <th className="p-2">ชื่อเรื่อง</th>
+                   <th className="p-2">ตอน</th>
+                   <th className="p-2 text-right">Action</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {chapters.map(c => {
+                   const m = mangas.find(m => m.id === c.mangaId);
+                   return (
+                     <tr key={c.id} className={`border-b last:border-0 ${isDark ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-100 hover:bg-gray-50'}`}>
+                       <td className={`p-2 font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{m?.title || 'Unknown Manga'}</td>
+                       <td className={`p-2 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{c.title}</td>
+                       <td className="p-2 text-right">
+                         <button 
+                           onClick={() => handleDeleteChapter(c.id)}
+                           className="text-red-500 hover:bg-red-100 p-1 rounded transition"
+                           title="ลบตอน"
+                         >
+                           <Trash2 size={16} />
+                         </button>
+                       </td>
+                     </tr>
+                   )
+                 })}
+               </tbody>
+             </table>
+           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Main Render ---
+  return (
+    <div className={`min-h-screen transition-colors duration-300 font-sans ${isDark ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-900'}`}>
+      {view !== 'read' && <Navbar />}
+      
+      <main>
+        {view === 'home' && <HomeView />}
+        {view === 'detail' && <MangaDetailView />}
+        {view === 'read' && <ReaderView />}
+        {view === 'admin' && <AdminPanelView />}
+      </main>
+
+      <LoginModal />
+    </div>
+  );
+}
